@@ -77,6 +77,8 @@ def get_db_connection():
         msg = f"Missing environment variables: {', '.join(missing)}"
         logging.error(msg)
         raise EnvironmentError(msg)
+    
+    # First try to connect to the specific database
     try:
         connection = pymysql.connect(
             host=os.environ.get("DB_HOST"),
@@ -86,29 +88,58 @@ def get_db_connection():
         )
         return connection
     except OperationalError as e:
-        raise ConnectionError(f"Failed to connect to the database: {e}")
+        # If database doesn't exist, create it
+        if "Unknown database" in str(e):
+            logging.info(f"Database {os.environ.get('DB_NAME')} doesn't exist. Creating it...")
+            try:
+                # Connect without specifying database
+                temp_connection = pymysql.connect(
+                    host=os.environ.get("DB_HOST"),
+                    user=os.environ.get("DB_USER"),
+                    password=os.environ.get("DB_PASSWORD")
+                )
+                with temp_connection.cursor() as cursor:
+                    cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{os.environ.get('DB_NAME')}`")
+                temp_connection.commit()
+                temp_connection.close()
+                logging.info(f"Database {os.environ.get('DB_NAME')} created successfully")
+                
+                # Now connect to the newly created database
+                connection = pymysql.connect(
+                    host=os.environ.get("DB_HOST"),
+                    user=os.environ.get("DB_USER"),
+                    password=os.environ.get("DB_PASSWORD"),
+                    db=os.environ.get("DB_NAME")
+                )
+                return connection
+            except Exception as create_error:
+                logging.error(f"Failed to create database: {create_error}")
+                raise ConnectionError(f"Failed to create database: {create_error}")
+        else:
+            raise ConnectionError(f"Failed to connect to the database: {e}")
 
 def create_db_table():
     connection = get_db_connection()
     try:
-        with get_db_connection() as connection:
-            with connection.cursor() as cursor:
-                create_table_sql = """
-                CREATE TABLE IF NOT EXISTS events (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    image_url VARCHAR(255),
-                    date DATE NOT NULL,
-                    location VARCHAR(255)
-                )
-                """
-                cursor.execute(create_table_sql)
-            connection.commit()
-            logging.info("Events table created or already exists")
+        with connection.cursor() as cursor:
+            create_table_sql = """
+            CREATE TABLE IF NOT EXISTS events (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                image_url VARCHAR(255),
+                date DATE NOT NULL,
+                location VARCHAR(255)
+            )
+            """
+            cursor.execute(create_table_sql)
+        connection.commit()
+        logging.info("Events table created or already exists")
     except Exception as e:
         logging.exception("Failed to create or verify the events table")
         raise RuntimeError(f"Table creation failed: {str(e)}")
+    finally:
+        connection.close()
 
 def insert_data_into_db(payload):
     """
@@ -168,5 +199,6 @@ def fetch_data_from_db():
         raise RuntimeError(f"Fetch failed: {str(e)}")
     finally:
         connection.close()
+
 if __name__ == '__main__':
     application.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))

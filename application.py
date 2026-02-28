@@ -112,24 +112,61 @@ def create_db_table():
 
 def insert_data_into_db(payload):
     """
-    Stub for database communication.
-    Implement this function to insert the data into the database.
-    NOTE: Our autograder will automatically insert data into the DB automatically keeping in mind the explained SCHEMA, you dont have to insert your own data.
+    Inserts an event record into the RDS MySQL database.
+    Expected payload keys:
+      - title (str)
+      - description (str)
+      - image_url (str)
+      - date (YYYY-MM-DD)
+      - location (str)
     """
-    create_db_table()
-    # TODO: Implement the database call    
-    
-    raise NotImplementedError("Database insert function not implemented.")
+    create_db_table()  # ensure table exists
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            insert_sql = """
+                INSERT INTO events (title, description, image_url, date, location)
+                VALUES (%s, %s, %s, %s, %s)
+            """
+            cursor.execute(
+                insert_sql,
+                (
+                    payload.get("title"),
+                    payload.get("description"),
+                    payload.get("image_url"),
+                    payload.get("date"),
+                    payload.get("location"),
+                ),
+            )
+        connection.commit()
+        logging.info("Event inserted successfully")
+    except Exception as e:
+        logging.exception("Error inserting data into DB")
+        raise RuntimeError(f"Insert failed: {str(e)}")
+    finally:
+        connection.close()
 
-#Database Function Stub
+
 def fetch_data_from_db():
     """
-    Stub for database communication.
-    Implement this function to fetch your data from the database.
+    Fetches all event records from the database in ascending order of date.
     """
-    # TODO: Implement the database call
-    
-    raise NotImplementedError("Database fetch function not implemented.")
-
+    create_db_table()  # ensure table exists
+    connection = get_db_connection()
+    try:
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            select_sql = """
+                SELECT id, title, description, image_url, date, location
+                FROM events
+                ORDER BY date ASC
+            """
+            cursor.execute(select_sql)
+            rows = cursor.fetchall()
+            return rows
+    except Exception as e:
+        logging.exception("Error fetching data from DB")
+        raise RuntimeError(f"Fetch failed: {str(e)}")
+    finally:
+        connection.close()
 if __name__ == '__main__':
     application.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
